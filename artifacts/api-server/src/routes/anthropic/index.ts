@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { eq } from "drizzle-orm";
 import { db, conversations, messages } from "@workspace/db";
 import {
@@ -15,42 +17,50 @@ import type { ImageBlockParam, TextBlockParam, DocumentBlockParam } from "@anthr
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
+const FILES_DIR = path.join(process.cwd(), "generated-files");
+if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR, { recursive: true });
+
 type MessageContentBlock = TextBlockParam | ImageBlockParam | DocumentBlockParam;
+
+const SYSTEM_PROMPT = `Sen yardımcı bir AI asistanısın. 
+
+Kullanıcı senden dosya üretmeni istediğinde (kod, metin, konfigürasyon, vb.), yanıtının içinde aşağıdaki XML formatını kullan:
+
+<file name="dosyaadi.uzanti">
+dosya içeriği buraya
+</file>
+
+Örnek:
+<file name="script.py">
+print("Merhaba Dünya")
+</file>
+
+<file name="config.json">
+{"key": "value"}
+</file>
+
+Birden fazla dosya üretebilirsin. Dosya bloklarını yanıtının herhangi bir yerine koyabilirsin.
+Açıklama ve dosya içeriğini birlikte sunabilirsin.`;
 
 function buildContentBlocks(text: string, file?: Express.Multer.File): MessageContentBlock[] {
   const blocks: MessageContentBlock[] = [];
-
   if (file) {
     const base64 = file.buffer.toString("base64");
     const mime = file.mimetype;
-
     if (mime.startsWith("image/")) {
       const mediaType = mime as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-      blocks.push({
-        type: "image",
-        source: { type: "base64", media_type: mediaType, data: base64 },
-      });
+      blocks.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64 } });
     } else if (mime === "application/pdf") {
-      blocks.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: base64 },
-      });
+      blocks.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } });
     }
   }
-
-  if (text) {
-    blocks.push({ type: "text", text });
-  }
-
+  if (text) blocks.push({ type: "text", text });
   return blocks;
 }
 
 function serializeContent(text: string, file?: Express.Multer.File): string {
   if (!file) return text;
-  return JSON.stringify({
-    text,
-    attachment: { name: file.originalname, type: file.mimetype },
-  });
+  return JSON.stringify({ text, attachment: { name: file.originalname, type: file.mimetype } });
 }
 
 function deserializeContentBlocks(raw: string): MessageContentBlock[] {
@@ -59,83 +69,79 @@ function deserializeContentBlocks(raw: string): MessageContentBlock[] {
     if (parsed.text !== undefined && parsed.attachment) {
       return [{ type: "text", text: parsed.text + `\n[Attached file: ${parsed.attachment.name}]` }];
     }
+    if (parsed._files) {
+      return [{ type: "text", text: parsed.rawText || "" }];
+    }
   } catch {
     // plain text
   }
   return [{ type: "text", text: raw }];
 }
 
+interface SavedFile {
+  name: string;
+  downloadUrl: string;
+  size: number;
+}
+
+function extractAndSaveFiles(response: string): { cleanText: string; savedFiles: SavedFile[] } {
+  const savedFiles: SavedFile[] = [];
+  const filePattern = /<file\s+name="([^"]+)">([\s\S]*?)<\/file>/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = filePattern.exec(response)) !== null) {
+    const fileName = match[1].replace(/[^a-zA-Z0-9._\-]/g, "_");
+    const fileContent = match[2].replace(/^\n/, "").replace(/\n$/, "");
+
+    const timestamp = Date.now();
+    const safeFileName = `${timestamp}_${fileName}`;
+    const filePath = path.join(FILES_DIR, safeFileName);
+
+    fs.writeFileSync(filePath, fileContent, "utf8");
+    savedFiles.push({
+      name: fileName,
+      downloadUrl: `/api/files/${safeFileName}`,
+      size: Buffer.byteLength(fileContent, "utf8"),
+    });
+  }
+
+  const cleanText = response.replace(/<file\s+name="[^"]+">[\s\S]*?<\/file>/g, "").trim();
+  return { cleanText, savedFiles };
+}
+
 router.get("/anthropic/conversations", async (_req, res): Promise<void> => {
-  const convos = await db
-    .select()
-    .from(conversations)
-    .orderBy(conversations.createdAt);
+  const convos = await db.select().from(conversations).orderBy(conversations.createdAt);
   res.json(convos);
 });
 
 router.post("/anthropic/conversations", async (req, res): Promise<void> => {
   const parsed = CreateAnthropicConversationBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-  const [convo] = await db
-    .insert(conversations)
-    .values({ title: parsed.data.title })
-    .returning();
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [convo] = await db.insert(conversations).values({ title: parsed.data.title }).returning();
   res.status(201).json(convo);
 });
 
 router.get("/anthropic/conversations/:id", async (req, res): Promise<void> => {
   const params = GetAnthropicConversationParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const [convo] = await db
-    .select()
-    .from(conversations)
-    .where(eq(conversations.id, params.data.id));
-  if (!convo) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-  const msgs = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, params.data.id))
-    .orderBy(messages.createdAt);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const [convo] = await db.select().from(conversations).where(eq(conversations.id, params.data.id));
+  if (!convo) { res.status(404).json({ error: "Conversation not found" }); return; }
+  const msgs = await db.select().from(messages).where(eq(messages.conversationId, params.data.id)).orderBy(messages.createdAt);
   res.json({ ...convo, messages: msgs });
 });
 
 router.delete("/anthropic/conversations/:id", async (req, res): Promise<void> => {
   const params = DeleteAnthropicConversationParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const [deleted] = await db
-    .delete(conversations)
-    .where(eq(conversations.id, params.data.id))
-    .returning();
-  if (!deleted) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const [deleted] = await db.delete(conversations).where(eq(conversations.id, params.data.id)).returning();
+  if (!deleted) { res.status(404).json({ error: "Conversation not found" }); return; }
   res.sendStatus(204);
 });
 
 router.get("/anthropic/conversations/:id/messages", async (req, res): Promise<void> => {
   const params = ListAnthropicMessagesParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const msgs = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, params.data.id))
-    .orderBy(messages.createdAt);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const msgs = await db.select().from(messages).where(eq(messages.conversationId, params.data.id)).orderBy(messages.createdAt);
   res.json(msgs);
 });
 
@@ -144,27 +150,15 @@ router.post(
   upload.single("file"),
   async (req, res): Promise<void> => {
     const params = SendAnthropicMessageParams.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: params.error.message });
-      return;
-    }
+    if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
     const text: string = req.body?.content ?? "";
     const file = req.file;
 
-    if (!text && !file) {
-      res.status(400).json({ error: "content or file is required" });
-      return;
-    }
+    if (!text && !file) { res.status(400).json({ error: "content or file is required" }); return; }
 
-    const [convo] = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.id, params.data.id));
-    if (!convo) {
-      res.status(404).json({ error: "Conversation not found" });
-      return;
-    }
+    const [convo] = await db.select().from(conversations).where(eq(conversations.id, params.data.id));
+    if (!convo) { res.status(404).json({ error: "Conversation not found" }); return; }
 
     await db.insert(messages).values({
       conversationId: params.data.id,
@@ -181,15 +175,9 @@ router.post(
     const chatMessages = history.map((m, idx) => {
       const isLast = idx === history.length - 1;
       if (isLast && m.role === "user" && file) {
-        return {
-          role: "user" as const,
-          content: buildContentBlocks(text, file),
-        };
+        return { role: "user" as const, content: buildContentBlocks(text, file) };
       }
-      return {
-        role: m.role as "user" | "assistant",
-        content: deserializeContentBlocks(m.content),
-      };
+      return { role: m.role as "user" | "assistant", content: deserializeContentBlocks(m.content) };
     });
 
     res.setHeader("Content-Type", "text/event-stream");
@@ -201,23 +189,31 @@ router.post(
     const stream = anthropic.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 8192,
+      system: SYSTEM_PROMPT,
       messages: chatMessages,
     });
 
     for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
+      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
         fullResponse += event.delta.text;
         res.write(`data: ${JSON.stringify({ content: event.delta.text })}\n\n`);
       }
     }
 
+    const { cleanText, savedFiles } = extractAndSaveFiles(fullResponse);
+
+    for (const f of savedFiles) {
+      res.write(`data: ${JSON.stringify({ file: f })}\n\n`);
+    }
+
+    const storedContent = savedFiles.length > 0
+      ? JSON.stringify({ rawText: cleanText, _files: savedFiles })
+      : fullResponse;
+
     await db.insert(messages).values({
       conversationId: params.data.id,
       role: "assistant",
-      content: fullResponse,
+      content: storedContent,
     });
 
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);

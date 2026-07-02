@@ -1,6 +1,6 @@
 import { useLocation, useParams } from "wouter";
 import { useState, useRef, useEffect } from "react";
-import { 
+import {
   useListAnthropicConversations,
   useGetAnthropicConversation,
   useListAnthropicMessages,
@@ -13,7 +13,10 @@ import { useChatStream } from "@/hooks/use-chat-stream";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PenSquare, Trash2, Send, Loader2, Sparkles, Menu, Paperclip, X, FileText, Image } from "lucide-react";
+import {
+  PenSquare, Trash2, Send, Loader2, Terminal, Menu,
+  Paperclip, X, FileText, Image, Download, Github, Settings
+} from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,36 +27,77 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import type { GeneratedFile } from "@/types";
 
 const ACCEPTED_TYPES = "image/jpeg,image/png,image/gif,image/webp,application/pdf";
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 function MarkdownContent({ content }: { content: string }) {
-  const paragraphs = content.split(/\n\n+/);
+  const parts = content.split(/(```[\s\S]*?```)/g);
   return (
     <div className="prose prose-invert max-w-none">
-      {paragraphs.map((para, i) => {
-        if (para.startsWith("```")) {
-          const lines = para.split("\n");
+      {parts.map((part, i) => {
+        if (part.startsWith("```")) {
+          const lines = part.split("\n");
+          const lang = lines[0].replace("```", "").trim();
           const code = lines.slice(1, -1).join("\n");
-          return <pre key={i}><code>{code}</code></pre>;
+          return (
+            <pre key={i}>
+              {lang && <div className="text-muted-foreground text-xs mb-1 font-mono">{lang}</div>}
+              <code>{code}</code>
+            </pre>
+          );
         }
-        const lines = para.split("\n");
-        return (
-          <p key={i}>
-            {lines.map((line, j) => (
-              <span key={j}>
-                {line}
-                {j < lines.length - 1 && <br />}
-              </span>
-            ))}
-          </p>
-        );
+        const paragraphs = part.split(/\n\n+/);
+        return paragraphs.map((para, j) => {
+          if (!para.trim()) return null;
+          if (para.startsWith("# ")) return <h1 key={`${i}-${j}`}>{para.slice(2)}</h1>;
+          if (para.startsWith("## ")) return <h2 key={`${i}-${j}`}>{para.slice(3)}</h2>;
+          if (para.startsWith("### ")) return <h3 key={`${i}-${j}`}>{para.slice(4)}</h3>;
+          const lines = para.split("\n");
+          if (lines.every(l => l.startsWith("- ") || l.startsWith("* "))) {
+            return <ul key={`${i}-${j}`}>{lines.map((l, k) => <li key={k}>{renderInline(l.slice(2))}</li>)}</ul>;
+          }
+          if (lines.every(l => /^\d+\. /.test(l))) {
+            return <ol key={`${i}-${j}`}>{lines.map((l, k) => <li key={k}>{renderInline(l.replace(/^\d+\. /, ""))}</li>)}</ol>;
+          }
+          return (
+            <p key={`${i}-${j}`}>
+              {lines.map((line, k) => (
+                <span key={k}>{renderInline(line)}{k < lines.length - 1 && <br />}</span>
+              ))}
+            </p>
+          );
+        });
       })}
     </div>
   );
+}
+
+function renderInline(text: string): React.ReactNode {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={i}>{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
 }
 
 function parseMessageContent(raw: string): { text: string; attachment?: { name: string; type: string } } {
@@ -71,10 +115,141 @@ function parseMessageContent(raw: string): { text: string; attachment?: { name: 
 function AttachmentBadge({ name, type }: { name: string; type: string }) {
   const isImage = type.startsWith("image/");
   return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-accent/50 rounded-lg px-2.5 py-1.5 mb-1.5 w-fit">
+    <div className="flex items-center gap-1 text-xs text-muted-foreground bg-accent/50 rounded px-2 py-1 mb-1 w-fit">
       {isImage ? <Image className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
       <span className="truncate max-w-[200px]">{name}</span>
     </div>
+  );
+}
+
+function FileDownloadCard({ file }: { file: GeneratedFile }) {
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  return (
+    <a
+      href={`${BASE}${file.downloadUrl}`}
+      download={file.name}
+      className="flex items-center gap-2 bg-accent/40 hover:bg-accent/70 border border-border rounded px-3 py-2 text-xs transition-colors cursor-pointer no-underline"
+    >
+      <FileText className="w-3.5 h-3.5 text-primary shrink-0" />
+      <span className="font-mono text-foreground flex-1 truncate">{file.name}</span>
+      <Download className="w-3 h-3 text-muted-foreground shrink-0" />
+    </a>
+  );
+}
+
+function GitHubPushDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [repo, setRepo] = useState("");
+  const [branch, setBranch] = useState("main");
+  const [message, setMessage] = useState("Update from Claude Chat");
+  const [pat, setPat] = useState("");
+  const [status, setStatus] = useState<"idle" | "pushing" | "done" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  const handlePush = async () => {
+    if (!repo || !pat) return;
+    setStatus("pushing");
+    setErrorMsg("");
+    try {
+      const res = await fetch(`${BASE}/api/github/push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo, branch, message, pat }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Push failed");
+      setStatus("done");
+    } catch (e: unknown) {
+      setStatus("error");
+      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+    }
+  };
+
+  const handleClose = () => {
+    setStatus("idle");
+    setErrorMsg("");
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
+      <DialogContent className="bg-card border-card-border text-foreground max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
+            <Github className="w-4 h-4" /> GitHub'a Gönder
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Kod dosyaları GitHub'a push edilir. Konuşmalar ve hassas bilgiler (.env, secrets) kesinlikle gönderilmez.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Repository (owner/repo)</label>
+            <input
+              className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="kullanici/repo-adi"
+              value={repo}
+              onChange={e => setRepo(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Branch</label>
+            <input
+              className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="main"
+              value={branch}
+              onChange={e => setBranch(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Commit mesajı</label>
+            <input
+              className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">GitHub PAT (Personal Access Token)</label>
+            <input
+              type="password"
+              className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="ghp_..."
+              value={pat}
+              onChange={e => setPat(e.target.value)}
+            />
+          </div>
+          {status === "done" && (
+            <div className="text-xs text-primary bg-primary/10 border border-primary/20 rounded px-2.5 py-2">
+              ✓ Başarıyla gönderildi!
+            </div>
+          )}
+          {status === "error" && (
+            <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded px-2.5 py-2">
+              Hata: {errorMsg}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={handleClose} className="text-xs h-7">
+            İptal
+          </Button>
+          <Button
+            size="sm"
+            onClick={handlePush}
+            disabled={!repo || !pat || status === "pushing"}
+            className="text-xs h-7 bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            {status === "pushing" ? (
+              <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Gönderiliyor...</>
+            ) : (
+              <><Github className="w-3 h-3 mr-1" /> Push Et</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -95,13 +270,14 @@ export default function ChatPage() {
   );
 
   const deleteConversation = useDeleteAnthropicConversation();
-  const { isStreaming, streamingContent, sendMessage } = useChatStream(conversationId);
+  const { isStreaming, streamingContent, streamingFiles, sendMessage } = useChatStream(conversationId);
 
   const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [convToDelete, setConvToDelete] = useState<number | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -121,7 +297,7 @@ export default function ChatPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > MAX_FILE_SIZE) {
-      setFileError("File is too large (max 20 MB)");
+      setFileError("Dosya çok büyük (max 20 MB)");
       return;
     }
     setFileError(null);
@@ -161,50 +337,68 @@ export default function ChatPage() {
   const canSend = (input.trim().length > 0 || !!attachedFile) && !isStreaming;
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full bg-sidebar">
-      <div className="p-4 flex items-center justify-between">
-        <div className="flex items-center gap-2 font-serif text-lg tracking-tight">
-          <Sparkles className="w-4 h-4 text-primary" />
-          <span>Assistant</span>
+    <div className="flex flex-col h-full" style={{ background: "hsl(var(--sidebar))" }}>
+      <div className="px-3 py-2.5 flex items-center justify-between border-b border-sidebar-border">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-sidebar-foreground">
+          <Terminal className="w-3.5 h-3.5 text-primary" />
+          <span>Claude Chat</span>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => { setLocation("/"); setMobileOpen(false); }}
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          data-testid="button-new-chat"
-        >
-          <PenSquare className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setGithubOpen(true)}
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            title="GitHub'a gönder"
+          >
+            <Github className="w-3 h-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => { setLocation("/"); setMobileOpen(false); }}
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            data-testid="button-new-chat"
+            title="Yeni sohbet"
+          >
+            <PenSquare className="w-3 h-3" />
+          </Button>
+        </div>
       </div>
-      <ScrollArea className="flex-1 px-3">
-        <div className="space-y-1 pb-4">
+      <div className="px-2 py-1.5">
+        <div className="text-xs text-muted-foreground px-1 py-0.5 uppercase tracking-wider" style={{ fontSize: "10px" }}>
+          Sohbetler
+        </div>
+      </div>
+      <ScrollArea className="flex-1 px-2">
+        <div className="space-y-0.5 pb-4">
           {isLoadingConversations ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
             </div>
           ) : conversations?.length === 0 ? (
-            <div className="text-sm text-muted-foreground text-center py-8 font-serif italic">
-              No conversations yet
+            <div className="text-xs text-muted-foreground text-center py-6 italic">
+              Henüz sohbet yok
             </div>
           ) : (
             conversations?.map((conv) => (
               <div
                 key={conv.id}
                 className={cn(
-                  "group flex items-center justify-between p-2 rounded-md cursor-pointer transition-colors text-sm",
+                  "group flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors",
                   conversationId === conv.id
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/50"
                 )}
+                style={{ fontSize: "12px" }}
                 onClick={() => { setLocation(`/c/${conv.id}`); setMobileOpen(false); }}
                 data-testid={`link-conversation-${conv.id}`}
               >
-                <div className="truncate flex-1 pr-2">{conv.title || "Untitled"}</div>
+                <div className="truncate flex-1 pr-1">{conv.title || "Adsız"}</div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  className="h-5 w-5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
                   onClick={(e) => { e.stopPropagation(); setConvToDelete(conv.id); }}
                 >
                   <Trash2 className="w-3 h-3" />
@@ -219,61 +413,73 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-[100dvh] bg-background overflow-hidden text-foreground">
-      <div className="hidden md:flex w-64 border-r border-border flex-col">
+      <div className="hidden md:flex w-56 border-r border-border flex-col shrink-0">
         <SidebarContent />
       </div>
 
-      <div className="flex-1 flex flex-col h-full relative w-full">
-        <div className="md:hidden flex items-center justify-between p-4 border-b border-border bg-background">
+      <div className="flex-1 flex flex-col h-full relative w-full min-w-0">
+        <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-border bg-background">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
-                <Menu className="w-5 h-5" />
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+                <Menu className="w-4 h-4" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-64 border-r border-border">
+            <SheetContent side="left" className="p-0 w-56 border-r border-border">
               <SidebarContent />
             </SheetContent>
           </Sheet>
-          <div className="font-serif text-lg tracking-tight">{conversation?.title || "Assistant"}</div>
+          <div className="text-xs font-medium">{conversation?.title || "Claude Chat"}</div>
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setLocation("/")}
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
           >
-            <PenSquare className="w-4 h-4" />
+            <PenSquare className="w-3.5 h-3.5" />
           </Button>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 md:px-8 py-6 pb-40">
-          <div className="max-w-3xl mx-auto space-y-8">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 md:px-6 py-4 pb-36">
+          <div className="max-w-4xl mx-auto space-y-4">
             {!conversationId ? (
-              <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                <div className="w-12 h-12 rounded-full bg-accent flex items-center justify-center mb-4 border border-border">
-                  <Sparkles className="w-6 h-6 text-primary" />
+              <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center border border-border">
+                  <Terminal className="w-5 h-5 text-primary" />
                 </div>
-                <h1 className="text-3xl font-serif tracking-tight text-foreground">How can I help you today?</h1>
-                <p className="text-muted-foreground font-serif italic">A clear, focused space for thinking.</p>
+                <h1 className="text-base font-semibold text-foreground">Size nasıl yardımcı olabilirim?</h1>
+                <p className="text-xs text-muted-foreground">Dosya üretebilir, kod yazabilir, sorularınızı yanıtlayabilirim.</p>
               </div>
             ) : (
               <>
                 {isLoadingMessages ? (
-                  <div className="flex items-center justify-center py-16">
-                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
                   <>
-                    <div className="hidden md:block text-center mb-8">
-                      <h2 className="text-lg font-serif text-muted-foreground">{conversation?.title}</h2>
-                    </div>
+                    {conversation?.title && (
+                      <div className="hidden md:block text-center mb-4">
+                        <h2 className="text-xs text-muted-foreground font-medium">{conversation.title}</h2>
+                      </div>
+                    )}
                     {messages?.map((msg) => {
                       const { text, attachment } = parseMessageContent(msg.content);
+                      let msgFiles: GeneratedFile[] = [];
+                      let displayText = text;
+                      try {
+                        const meta = JSON.parse(msg.content);
+                        if (meta._files) {
+                          msgFiles = meta._files;
+                          displayText = meta.rawText || "";
+                        }
+                      } catch { /* plain text */ }
+
                       return (
                         <div
                           key={msg.id}
                           className={cn(
-                            "flex flex-col animate-in fade-in duration-500",
+                            "flex flex-col animate-in fade-in duration-300",
                             msg.role === "user" ? "items-end" : "items-start"
                           )}
                         >
@@ -282,18 +488,28 @@ export default function ChatPage() {
                           )}
                           <div
                             className={cn(
-                              "px-5 py-3.5 max-w-[85%] sm:max-w-[75%]",
+                              "max-w-[88%] sm:max-w-[80%]",
                               msg.role === "user"
-                                ? "bg-accent text-accent-foreground rounded-2xl rounded-tr-sm"
-                                : "text-foreground font-serif leading-relaxed text-lg"
+                                ? "bg-accent text-accent-foreground rounded-lg rounded-tr-sm px-3 py-2 text-xs"
+                                : "text-foreground"
                             )}
                           >
                             {msg.role === "assistant" ? (
-                              <MarkdownContent content={msg.content} />
+                              <MarkdownContent content={displayText || msg.content} />
                             ) : (
-                              <div className="whitespace-pre-wrap">{text || <span className="text-muted-foreground italic">(file only)</span>}</div>
+                              <div className="whitespace-pre-wrap">{text || <span className="text-muted-foreground italic">(sadece dosya)</span>}</div>
                             )}
                           </div>
+                          {msgFiles.length > 0 && (
+                            <div className="mt-2 space-y-1 w-full max-w-[88%] sm:max-w-[80%]">
+                              <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                                <Download className="w-3 h-3" /> Üretilen dosyalar
+                              </div>
+                              {msgFiles.map((f, i) => (
+                                <FileDownloadCard key={i} file={f} />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -302,17 +518,27 @@ export default function ChatPage() {
 
                 {isStreaming && (
                   <div className="flex flex-col items-start animate-in fade-in duration-300">
-                    <div className="py-3.5 max-w-[85%] sm:max-w-[75%] text-foreground font-serif leading-relaxed text-lg">
+                    <div className="max-w-[88%] sm:max-w-[80%] text-foreground">
                       {streamingContent ? (
                         <MarkdownContent content={streamingContent} />
                       ) : (
-                        <div className="flex items-center gap-1 h-6">
-                          <span className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-                          <span className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
-                          <span className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
+                        <div className="flex items-center gap-1 h-5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
                         </div>
                       )}
                     </div>
+                    {streamingFiles.length > 0 && (
+                      <div className="mt-2 space-y-1 w-full max-w-[88%] sm:max-w-[80%]">
+                        <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                          <Download className="w-3 h-3" /> Üretilen dosyalar
+                        </div>
+                        {streamingFiles.map((f, i) => (
+                          <FileDownloadCard key={i} file={f} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -320,43 +546,41 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Input Area */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background to-transparent pt-12 pb-6 px-4 md:px-8 pointer-events-none">
-          <div className="max-w-3xl mx-auto pointer-events-auto">
-            {/* Attached file preview */}
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background to-transparent pt-8 pb-4 px-4 md:px-6 pointer-events-none">
+          <div className="max-w-4xl mx-auto pointer-events-auto">
             {attachedFile && (
-              <div className="mb-2 flex items-center gap-2 bg-card border border-card-border rounded-xl px-3 py-2 w-fit">
+              <div className="mb-1.5 flex items-center gap-1.5 bg-card border border-card-border rounded px-2.5 py-1.5 w-fit">
                 {attachedFile.type.startsWith("image/") ? (
-                  <Image className="w-4 h-4 text-primary shrink-0" />
+                  <Image className="w-3 h-3 text-primary shrink-0" />
                 ) : (
-                  <FileText className="w-4 h-4 text-primary shrink-0" />
+                  <FileText className="w-3 h-3 text-primary shrink-0" />
                 )}
-                <span className="text-sm text-foreground truncate max-w-[240px]">{attachedFile.name}</span>
+                <span className="text-xs text-foreground truncate max-w-[200px]">{attachedFile.name}</span>
                 <button
                   onClick={() => setAttachedFile(null)}
-                  className="text-muted-foreground hover:text-foreground transition-colors ml-1"
+                  className="text-muted-foreground hover:text-foreground transition-colors ml-0.5"
                   data-testid="button-remove-attachment"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-3 h-3" />
                 </button>
               </div>
             )}
             {fileError && (
-              <div className="mb-2 text-xs text-destructive">{fileError}</div>
+              <div className="mb-1.5 text-xs text-destructive">{fileError}</div>
             )}
-            <div className="relative rounded-2xl bg-card border border-card-border shadow-lg shadow-black/20 focus-within:ring-1 focus-within:ring-primary/30 transition-all duration-300">
+            <div className="relative rounded-lg bg-card border border-card-border shadow-lg focus-within:border-primary/50 transition-all duration-200">
               <Textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message Assistant..."
-                className="min-h-[60px] max-h-[200px] w-full resize-none border-0 bg-transparent py-4 pl-4 pr-24 focus-visible:ring-0 text-base placeholder:text-muted-foreground"
+                placeholder="Mesajınızı yazın... (Shift+Enter: yeni satır)"
+                className="min-h-[52px] max-h-[180px] w-full resize-none border-0 bg-transparent py-3 pl-3 pr-20 focus-visible:ring-0 text-xs placeholder:text-muted-foreground"
                 rows={1}
                 disabled={isStreaming}
                 data-testid="input-message"
               />
-              <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
+              <div className="absolute bottom-2 right-2 flex items-center gap-1">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -369,7 +593,7 @@ export default function ChatPage() {
                   size="icon"
                   variant="ghost"
                   className={cn(
-                    "h-8 w-8 rounded-xl transition-all duration-300",
+                    "h-7 w-7 rounded transition-all",
                     attachedFile
                       ? "text-primary bg-primary/10"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -377,49 +601,51 @@ export default function ChatPage() {
                   disabled={isStreaming}
                   onClick={() => fileInputRef.current?.click()}
                   data-testid="button-attach"
-                  title="Attach image or PDF"
+                  title="Dosya ekle"
                 >
-                  <Paperclip className="w-4 h-4" />
+                  <Paperclip className="w-3.5 h-3.5" />
                 </Button>
                 <Button
                   size="icon"
                   className={cn(
-                    "h-8 w-8 rounded-xl transition-all duration-300",
+                    "h-7 w-7 rounded transition-all",
                     canSend
-                      ? "bg-primary text-primary-foreground opacity-100 hover:bg-primary/90"
-                      : "bg-muted text-muted-foreground opacity-50"
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "bg-muted text-muted-foreground opacity-40"
                   )}
                   disabled={!canSend}
                   onClick={handleSend}
                   data-testid="button-send"
                 >
-                  <Send className="w-4 h-4" />
+                  <Send className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </div>
-            <div className="text-center mt-2 text-xs text-muted-foreground font-serif italic">
-              Assistant can make mistakes. Consider verifying important information.
+            <div className="text-center mt-1.5 text-muted-foreground" style={{ fontSize: "10px" }}>
+              Claude hata yapabilir. Önemli bilgileri doğrulayın.
             </div>
           </div>
         </div>
       </div>
 
       <AlertDialog open={!!convToDelete} onOpenChange={(open) => !open && setConvToDelete(null)}>
-        <AlertDialogContent className="bg-card border-card-border text-card-foreground">
+        <AlertDialogContent className="bg-card border-card-border text-card-foreground max-w-sm">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-serif text-xl">Delete conversation?</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground">
-              This action cannot be undone. This will permanently delete your conversation.
+            <AlertDialogTitle className="text-sm font-semibold">Sohbeti sil?</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground">
+              Bu işlem geri alınamaz. Sohbet kalıcı olarak silinecek.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-transparent hover:bg-accent hover:text-accent-foreground border-border">Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Delete
+            <AlertDialogCancel className="text-xs h-7 bg-transparent hover:bg-accent border-border">İptal</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="text-xs h-7 bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Sil
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <GitHubPushDialog open={githubOpen} onClose={() => setGithubOpen(false)} />
     </div>
   );
 }

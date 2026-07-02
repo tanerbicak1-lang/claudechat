@@ -1,16 +1,18 @@
 import { useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { 
+import {
   getListAnthropicMessagesQueryKey,
   getGetAnthropicConversationQueryKey,
   useCreateAnthropicConversation
 } from "@workspace/api-client-react";
+import type { GeneratedFile } from "@/types";
 
 export function useChatStream(conversationId?: number) {
   const queryClient = useQueryClient();
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
-  
+  const [streamingFiles, setStreamingFiles] = useState<GeneratedFile[]>([]);
+
   const createConversation = useCreateAnthropicConversation();
 
   const sendMessage = useCallback(async (content: string, file?: File) => {
@@ -19,7 +21,7 @@ export function useChatStream(conversationId?: number) {
     let targetConversationId = conversationId;
 
     if (!targetConversationId) {
-      const title = content.slice(0, 40) + (content.length > 40 ? "..." : "") || (file ? file.name : "New conversation");
+      const title = content.slice(0, 40) + (content.length > 40 ? "..." : "") || (file ? file.name : "Yeni sohbet");
       const newConv = await createConversation.mutateAsync({
         data: { title }
       });
@@ -28,6 +30,7 @@ export function useChatStream(conversationId?: number) {
 
     setIsStreaming(true);
     setStreamingContent("");
+    setStreamingFiles([]);
 
     try {
       const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -51,22 +54,23 @@ export function useChatStream(conversationId?: number) {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to send message");
+        throw new Error("Mesaj gönderilemedi");
       }
 
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       let fullContent = "";
+      const collectedFiles: GeneratedFile[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-        
+
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
@@ -75,15 +79,19 @@ export function useChatStream(conversationId?: number) {
               fullContent += parsed.content;
               setStreamingContent(fullContent);
             }
+            if (parsed.file) {
+              collectedFiles.push(parsed.file);
+              setStreamingFiles([...collectedFiles]);
+            }
           } catch {
-            // ignore incomplete chunks
+            // incomplete chunks
           }
         }
       }
-      
+
       queryClient.invalidateQueries({ queryKey: getListAnthropicMessagesQueryKey(targetConversationId) });
       queryClient.invalidateQueries({ queryKey: getGetAnthropicConversationQueryKey(targetConversationId) });
-      
+
     } catch (error) {
       console.error("Stream error:", error);
     } finally {
@@ -97,6 +105,7 @@ export function useChatStream(conversationId?: number) {
   return {
     isStreaming,
     streamingContent,
+    streamingFiles,
     sendMessage
   };
 }

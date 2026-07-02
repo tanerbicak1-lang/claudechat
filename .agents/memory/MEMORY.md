@@ -1,0 +1,1 @@
+- [Claude Chat file generation pattern](claude-chat-file-gen.md) — `<file name="...">content</file>` XML format parsed server-side; never circular-import GeneratedFile from chat.tsx, use types.ts
