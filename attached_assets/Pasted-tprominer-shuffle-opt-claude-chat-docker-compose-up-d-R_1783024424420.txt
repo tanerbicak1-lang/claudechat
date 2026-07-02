@@ -1,0 +1,53 @@
+tprominer@shuffle:/opt/claude-chat$ docker compose up -d
+[+] Running 3/3
+ ✔ Container claude-chat-postgres-1  Healthy                                                               0.6s 
+ ✔ Container claude-chat-api-1       Started                                                               0.0s 
+ ✔ Container claude-chat-web-1       Started                                                               0.2s 
+tprominer@shuffle:/opt/claude-chat$ docker compose ps
+NAME                     IMAGE                COMMAND                  SERVICE    CREATED         STATUS                          PORTS
+claude-chat-api-1        claude-chat-api      "docker-entrypoint.s…"   api        2 minutes ago   Restarting (1) 40 seconds ago   
+claude-chat-postgres-1   postgres:16-alpine   "docker-entrypoint.s…"   postgres   2 minutes ago   Up 2 minutes (healthy)          5432/tcp
+claude-chat-web-1        claude-chat-web      "/docker-entrypoint.…"   web        2 minutes ago   Up 4 seconds                    
+tprominer@shuffle:/opt/claude-chat$ docker compose logs web --tail=20
+web-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+web-1  | 10-listen-on-ipv6-by-default.sh: info: Getting the checksum of /etc/nginx/conf.d/default.conf
+web-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf differs from the packaged version
+web-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+web-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+web-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+web-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+web-1  | 2026/07/02 20:32:42 [emerg] 1#1: host not found in upstream "api" in /etc/nginx/conf.d/default.conf:12
+web-1  | nginx: [emerg] host not found in upstream "api" in /etc/nginx/conf.d/default.conf:12
+web-1  | /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+web-1  | /docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+web-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+web-1  | 10-listen-on-ipv6-by-default.sh: info: Getting the checksum of /etc/nginx/conf.d/default.conf
+web-1  | 10-listen-on-ipv6-by-default.sh: info: /etc/nginx/conf.d/default.conf differs from the packaged version
+web-1  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+web-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+web-1  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+web-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
+web-1  | 2026/07/02 20:33:13 [emerg] 1#1: host not found in upstream "api" in /etc/nginx/conf.d/default.conf:12
+web-1  | nginx: [emerg] host not found in upstream "api" in /etc/nginx/conf.d/default.conf:12
+tprominer@shuffle:/opt/claude-chat$ docker compose logs api --tail=20
+api-1  |   throw err;
+api-1  |   ^
+api-1  | 
+api-1  | Error: Cannot find module '/workspace/node_modules/.pnpm/drizzle-kit@0.31.10/node_modules/drizzle-kit/bin.cjs'
+api-1  |     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+api-1  |     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+api-1  |     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+api-1  |     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+api-1  |     at Module._load (node:internal/modules/cjs/loader:1294:5)
+api-1  |     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+api-1  |     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+api-1  |     at node:internal/main/run_main_module:33:47 {
+api-1  |   code: 'MODULE_NOT_FOUND',
+api-1  |   requireStack: []
+api-1  | }
+api-1  | 
+api-1  | Node.js v24.18.0
+api-1  | /workspace/lib/db:
+api-1  | [ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @workspace/db@0.0.0 push-force: `drizzle-kit push --force --config ./drizzle.config.ts`
+api-1  | Exit status 1
+tprominer@shuffle:/opt/claude-chat$ 
