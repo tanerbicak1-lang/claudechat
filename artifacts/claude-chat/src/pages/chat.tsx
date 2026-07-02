@@ -39,8 +39,19 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import type { GeneratedFile } from "@/types";
 
-const ACCEPTED_TYPES = "image/jpeg,image/png,image/gif,image/webp,application/pdf";
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const ACCEPTED_TYPES = ".js,.mjs,.ts,.tsx,.jsx,.html,.htm,.css,.scss,.php,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.cpp,.cs,.sh,.sql,.json,.yaml,.yml,.xml,.toml,.env,.txt,.md,.csv,.vue,.svelte,image/jpeg,image/png,image/gif,image/webp,application/pdf";
+const MAX_TEXT_FILE_SIZE = 200 * 1024; // 200 KB
+const MAX_BINARY_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+
+const TEXT_EXTS = new Set(["js","mjs","cjs","ts","tsx","jsx","html","htm","css","scss","sass","less","php","py","rb","go","rs","java","kt","swift","c","cpp","h","cs","sh","bash","zsh","sql","json","yaml","yml","xml","toml","env","txt","md","markdown","csv","vue","svelte","astro","conf","config","ini"]);
+
+function getExt(name: string) { return name.split(".").pop()?.toLowerCase() ?? ""; }
+function isText(file: File) { return TEXT_EXTS.has(getExt(file.name)) || file.type.startsWith("text/"); }
+function fmtSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -284,8 +295,8 @@ export default function ChatPage() {
   const { isStreaming, streamingContent, streamingFiles, sendMessage } = useChatStream(conversationId);
 
   const [input, setInput] = useState("");
-  const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [fileErrors, setFileErrors] = useState<string[]>([]);
   const [convToDelete, setConvToDelete] = useState<number | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
@@ -305,24 +316,38 @@ export default function ChatPage() {
   }, [conversationId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > MAX_FILE_SIZE) {
-      setFileError("Dosya çok büyük (max 20 MB)");
-      return;
+    const selected = Array.from(e.target.files ?? []);
+    if (!selected.length) return;
+    const errors: string[] = [];
+    const valid: File[] = [];
+    for (const f of selected) {
+      const maxSize = isText(f) ? MAX_TEXT_FILE_SIZE : MAX_BINARY_FILE_SIZE;
+      if (f.size > maxSize) {
+        errors.push(`"${f.name}" çok büyük (max ${isText(f) ? "200 KB" : "20 MB"})`);
+      } else {
+        valid.push(f);
+      }
     }
-    setFileError(null);
-    setAttachedFile(file);
+    setFileErrors(errors);
+    setAttachedFiles(prev => {
+      const names = new Set(prev.map(f => f.name));
+      return [...prev, ...valid.filter(f => !names.has(f.name))];
+    });
     e.target.value = "";
   };
 
+  const removeFile = (index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSend = async () => {
-    if ((!input.trim() && !attachedFile) || isStreaming) return;
+    if ((!input.trim() && attachedFiles.length === 0) || isStreaming) return;
     const content = input;
-    const file = attachedFile;
+    const files = attachedFiles;
     setInput("");
-    setAttachedFile(null);
-    const newConvId = await sendMessage(content, file ?? undefined);
+    setAttachedFiles([]);
+    setFileErrors([]);
+    const newConvId = await sendMessage(content, files.length > 0 ? files : undefined);
     if (newConvId && newConvId !== conversationId) {
       queryClient.invalidateQueries({ queryKey: getListAnthropicConversationsQueryKey() });
       setLocation(`/c/${newConvId}`);
@@ -345,7 +370,7 @@ export default function ChatPage() {
     }
   };
 
-  const canSend = (input.trim().length > 0 || !!attachedFile) && !isStreaming;
+  const canSend = (input.trim().length > 0 || attachedFiles.length > 0) && !isStreaming;
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full" style={{ background: "hsl(var(--sidebar))" }}>
@@ -559,26 +584,42 @@ export default function ChatPage() {
 
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background to-transparent pt-8 pb-4 px-4 md:px-6 pointer-events-none">
           <div className="max-w-4xl mx-auto pointer-events-auto">
-            {attachedFile && (
-              <div className="mb-1.5 flex items-center gap-1.5 bg-card border border-card-border rounded px-2.5 py-1.5 w-fit">
-                {attachedFile.type.startsWith("image/") ? (
-                  <Image className="w-3 h-3 text-primary shrink-0" />
-                ) : (
-                  <FileText className="w-3 h-3 text-primary shrink-0" />
-                )}
-                <span className="text-xs text-foreground truncate max-w-[200px]">{attachedFile.name}</span>
-                <button
-                  onClick={() => setAttachedFile(null)}
-                  className="text-muted-foreground hover:text-foreground transition-colors ml-0.5"
-                  data-testid="button-remove-attachment"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+
+            {/* Multi-file list */}
+            {attachedFiles.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {attachedFiles.map((f, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1.5 bg-card border border-border rounded px-2 py-1 text-xs max-w-[200px]"
+                  >
+                    {isText(f) ? (
+                      <FileText className="w-3 h-3 text-primary shrink-0" />
+                    ) : (
+                      <Image className="w-3 h-3 text-primary shrink-0" />
+                    )}
+                    <span className="truncate text-foreground">{f.name}</span>
+                    <span className="text-muted-foreground shrink-0">({fmtSize(f.size)})</span>
+                    <button
+                      onClick={() => removeFile(i)}
+                      className="text-muted-foreground hover:text-destructive transition-colors ml-0.5 shrink-0"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
-            {fileError && (
-              <div className="mb-1.5 text-xs text-destructive">{fileError}</div>
+
+            {/* File errors */}
+            {fileErrors.length > 0 && (
+              <div className="mb-2 space-y-0.5">
+                {fileErrors.map((err, i) => (
+                  <div key={i} className="text-xs text-destructive">{err}</div>
+                ))}
+              </div>
             )}
+
             <div className="relative rounded-lg bg-card border border-card-border shadow-lg focus-within:border-primary/50 transition-all duration-200">
               <Textarea
                 ref={inputRef}
@@ -598,6 +639,7 @@ export default function ChatPage() {
                   accept={ACCEPTED_TYPES}
                   onChange={handleFileChange}
                   className="hidden"
+                  multiple
                   data-testid="input-file"
                 />
                 <Button
@@ -605,14 +647,14 @@ export default function ChatPage() {
                   variant="ghost"
                   className={cn(
                     "h-7 w-7 rounded transition-all",
-                    attachedFile
+                    attachedFiles.length > 0
                       ? "text-primary bg-primary/10"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent"
                   )}
                   disabled={isStreaming}
                   onClick={() => fileInputRef.current?.click()}
                   data-testid="button-attach"
-                  title="Dosya ekle"
+                  title={`Dosya ekle (JS, HTML, CSS, PY, PHP, JSON, TXT...)\n${attachedFiles.length > 0 ? `${attachedFiles.length} dosya seçili` : ""}`}
                 >
                   <Paperclip className="w-3.5 h-3.5" />
                 </Button>

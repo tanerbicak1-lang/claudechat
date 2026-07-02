@@ -15,16 +15,19 @@ export function useChatStream(conversationId?: number) {
 
   const createConversation = useCreateAnthropicConversation();
 
-  const sendMessage = useCallback(async (content: string, file?: File) => {
-    if ((!content.trim() && !file) || isStreaming) return null;
+  const sendMessage = useCallback(async (content: string, files?: File[]) => {
+    const hasContent = content.trim().length > 0;
+    const hasFiles = files && files.length > 0;
+    if ((!hasContent && !hasFiles) || isStreaming) return null;
 
     let targetConversationId = conversationId;
 
     if (!targetConversationId) {
-      const title = content.slice(0, 40) + (content.length > 40 ? "..." : "") || (file ? file.name : "Yeni sohbet");
-      const newConv = await createConversation.mutateAsync({
-        data: { title }
-      });
+      const firstName = files?.[0]?.name ?? "";
+      const title =
+        content.slice(0, 40) + (content.length > 40 ? "..." : "") ||
+        (firstName ? `${firstName} ve diğerleri` : "Yeni sohbet");
+      const newConv = await createConversation.mutateAsync({ data: { title } });
       targetConversationId = newConv.id;
     }
 
@@ -35,27 +38,20 @@ export function useChatStream(conversationId?: number) {
     try {
       const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-      let body: FormData | string;
-      let headers: Record<string, string> = {};
-
-      if (file) {
-        const formData = new FormData();
-        formData.append("content", content);
-        formData.append("file", file);
-        body = formData;
-      } else {
-        body = JSON.stringify({ content });
-        headers["Content-Type"] = "application/json";
+      const formData = new FormData();
+      formData.append("content", content);
+      if (files) {
+        for (const f of files) {
+          formData.append("files", f);
+        }
       }
 
       const response = await fetch(
         `${BASE}/api/anthropic/conversations/${targetConversationId}/messages`,
-        { method: "POST", headers, body }
+        { method: "POST", body: formData }
       );
 
-      if (!response.ok) {
-        throw new Error("Mesaj gönderilemedi");
-      }
+      if (!response.ok) throw new Error("Mesaj gönderilemedi");
 
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
@@ -102,10 +98,5 @@ export function useChatStream(conversationId?: number) {
     return targetConversationId;
   }, [conversationId, isStreaming, createConversation, queryClient]);
 
-  return {
-    isStreaming,
-    streamingContent,
-    streamingFiles,
-    sendMessage
-  };
+  return { isStreaming, streamingContent, streamingFiles, sendMessage };
 }
