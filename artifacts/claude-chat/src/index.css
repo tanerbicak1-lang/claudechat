@@ -62,44 +62,44 @@
 }
 
 :root {
-  --background: 220 13% 9%;
-  --foreground: 210 17% 82%;
+  --background: 0 0% 100%;
+  --foreground: 220 14% 10%;
 
-  --card: 220 13% 11%;
-  --card-foreground: 210 17% 82%;
-  --card-border: 220 13% 16%;
+  --card: 0 0% 98%;
+  --card-foreground: 220 14% 10%;
+  --card-border: 220 13% 88%;
 
-  --popover: 220 13% 11%;
-  --popover-foreground: 210 17% 82%;
-  --popover-border: 220 13% 16%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 14% 10%;
+  --popover-border: 220 13% 88%;
 
-  --primary: 158 64% 52%;
-  --primary-foreground: 220 13% 9%;
+  --primary: 24 90% 53%;
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 220 13% 16%;
-  --secondary-foreground: 210 17% 82%;
+  --secondary: 220 13% 95%;
+  --secondary-foreground: 220 14% 10%;
 
-  --muted: 220 13% 16%;
+  --muted: 220 13% 95%;
   --muted-foreground: 220 9% 46%;
 
-  --accent: 220 13% 18%;
-  --accent-foreground: 210 17% 92%;
+  --accent: 220 13% 93%;
+  --accent-foreground: 220 14% 10%;
 
-  --destructive: 0 62.8% 50%;
+  --destructive: 0 84% 55%;
   --destructive-foreground: 0 0% 100%;
 
-  --border: 220 13% 16%;
-  --input: 220 13% 16%;
-  --ring: 158 64% 52%;
+  --border: 220 13% 88%;
+  --input: 220 13% 88%;
+  --ring: 24 90% 53%;
 
-  --sidebar: 220 13% 7%;
-  --sidebar-foreground: 210 17% 72%;
-  --sidebar-border: 220 13% 13%;
-  --sidebar-primary: 158 64% 52%;
-  --sidebar-primary-foreground: 220 13% 9%;
-  --sidebar-accent: 220 13% 13%;
-  --sidebar-accent-foreground: 210 17% 88%;
-  --sidebar-ring: 158 64% 52%;
+  --sidebar: 220 13% 96%;
+  --sidebar-foreground: 220 14% 20%;
+  --sidebar-border: 220 13% 88%;
+  --sidebar-primary: 24 90% 53%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 220 13% 90%;
+  --sidebar-accent-foreground: 220 14% 10%;
+  --sidebar-ring: 24 90% 53%;
 
   --app-font-sans: 'Inter', system-ui, sans-serif;
   --app-font-serif: 'Inter', system-ui, sans-serif;
@@ -137,17 +137,30 @@ html {
 }
 .prose h1 { font-size: 1.15rem; }
 .prose code {
-  @apply bg-muted px-1.5 py-0.5 rounded text-foreground;
+  background: hsl(220 13% 92%);
+  color: hsl(220 14% 15%);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
   font-family: var(--app-font-mono);
   font-size: 0.85em;
 }
 .prose pre {
-  @apply bg-muted p-3 rounded-lg overflow-x-auto font-mono my-3 text-foreground border border-border;
+  background: hsl(220 13% 95%);
+  border: 1px solid hsl(220 13% 88%);
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: var(--app-font-mono);
   font-size: 12px;
   line-height: 1.5;
+  margin: 0.75rem 0;
+  color: hsl(220 14% 10%);
 }
 .prose pre code {
-  @apply bg-transparent p-0 text-inherit;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
 }
 .prose ul {
   @apply list-disc pl-5 mb-3 space-y-0.5;
@@ -162,5 +175,9 @@ html {
   @apply font-semibold text-foreground;
 }
 .prose blockquote {
-  @apply border-l-2 border-border pl-3 text-muted-foreground italic my-3;
+  border-left: 2px solid hsl(220 13% 82%);
+  padding-left: 0.75rem;
+  color: hsl(220 9% 46%);
+  font-style: italic;
+  margin: 0.75rem 0;
 }
