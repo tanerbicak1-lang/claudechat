@@ -138,61 +138,50 @@ function FileDownloadCard({ file }: { file: GeneratedFile }) {
 }
 
 function GitHubPushDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [repo, setRepo] = useState("");
   const [branch, setBranch] = useState("main");
   const [message, setMessage] = useState("Update from Claude Chat");
-  const [pat, setPat] = useState("");
   const [status, setStatus] = useState<"idle" | "pushing" | "done" | "error">("idle");
-  const [errorMsg, setErrorMsg] = useState("");
+  const [resultMsg, setResultMsg] = useState("");
 
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
   const handlePush = async () => {
-    if (!repo || !pat) return;
     setStatus("pushing");
-    setErrorMsg("");
+    setResultMsg("");
     try {
       const res = await fetch(`${BASE}/api/github/push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo, branch, message, pat }),
+        body: JSON.stringify({ branch, message }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Push failed");
+      if (!res.ok) throw new Error(data.error || "Push başarısız");
       setStatus("done");
+      setResultMsg(data.message || "Başarıyla gönderildi!");
     } catch (e: unknown) {
       setStatus("error");
-      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+      setResultMsg(e instanceof Error ? e.message : "Bilinmeyen hata");
     }
   };
 
   const handleClose = () => {
     setStatus("idle");
-    setErrorMsg("");
+    setResultMsg("");
     onClose();
   };
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="bg-card border-card-border text-foreground max-w-md">
+      <DialogContent className="bg-card border-card-border text-foreground max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
             <Github className="w-4 h-4" /> GitHub'a Gönder
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            Kod dosyaları GitHub'a push edilir. Konuşmalar ve hassas bilgiler (.env, secrets) kesinlikle gönderilmez.
+            Kod dosyaları push edilir. Konuşmalar, <code className="font-mono">.env</code> ve secrets asla gönderilmez.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Repository (owner/repo)</label>
-            <input
-              className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              placeholder="kullanici/repo-adi"
-              value={repo}
-              onChange={e => setRepo(e.target.value)}
-            />
-          </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Branch</label>
             <input
@@ -210,24 +199,14 @@ function GitHubPushDialog({ open, onClose }: { open: boolean; onClose: () => voi
               onChange={e => setMessage(e.target.value)}
             />
           </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">GitHub PAT (Personal Access Token)</label>
-            <input
-              type="password"
-              className="w-full bg-muted border border-border rounded px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              placeholder="ghp_..."
-              value={pat}
-              onChange={e => setPat(e.target.value)}
-            />
-          </div>
           {status === "done" && (
             <div className="text-xs text-primary bg-primary/10 border border-primary/20 rounded px-2.5 py-2">
-              ✓ Başarıyla gönderildi!
+              {resultMsg}
             </div>
           )}
           {status === "error" && (
-            <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded px-2.5 py-2">
-              Hata: {errorMsg}
+            <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded px-2.5 py-2 font-mono break-all">
+              Hata: {resultMsg}
             </div>
           )}
         </div>
@@ -238,13 +217,13 @@ function GitHubPushDialog({ open, onClose }: { open: boolean; onClose: () => voi
           <Button
             size="sm"
             onClick={handlePush}
-            disabled={!repo || !pat || status === "pushing"}
+            disabled={status === "pushing"}
             className="text-xs h-7 bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {status === "pushing" ? (
-              <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Gönderiliyor...</>
+              <><Loader2 className="w-3 h-3 animate-spin mr-1" />Gönderiliyor...</>
             ) : (
-              <><Github className="w-3 h-3 mr-1" /> Push Et</>
+              <><Github className="w-3 h-3 mr-1" />Push Et</>
             )}
           </Button>
         </DialogFooter>
