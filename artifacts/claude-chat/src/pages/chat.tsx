@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   PenSquare, Trash2, Send, Loader2, Terminal, Menu,
-  Paperclip, X, FileText, Image, Download, Github, Settings
+  Paperclip, X, FileText, Image, Download, Github, Copy, Check
 } from "lucide-react";
 import {
   AlertDialog,
@@ -42,43 +42,75 @@ import type { GeneratedFile } from "@/types";
 const ACCEPTED_TYPES = "image/jpeg,image/png,image/gif,image/webp,application/pdf";
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded text-xs"
+      title="Kopyala"
+    >
+      {copied ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+      {copied ? "Kopyalandı" : "Kopyala"}
+    </button>
+  );
+}
+
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  return (
+    <div className="my-3 rounded-lg border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted border-b border-border">
+        <span className="text-xs font-mono text-muted-foreground">{lang || "kod"}</span>
+        <CopyButton text={code} />
+      </div>
+      <pre className="overflow-x-auto p-3 text-xs leading-relaxed bg-card m-0 border-0 rounded-none">
+        <code className="font-mono text-foreground">{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function TextBlock({ text }: { text: string }) {
+  const paragraphs = text.split(/\n\n+/);
+  const nodes = paragraphs.map((para, j) => {
+    if (!para.trim()) return null;
+    if (para.startsWith("# ")) return <h1 key={j}>{para.slice(2)}</h1>;
+    if (para.startsWith("## ")) return <h2 key={j}>{para.slice(3)}</h2>;
+    if (para.startsWith("### ")) return <h3 key={j}>{para.slice(4)}</h3>;
+    const lines = para.split("\n");
+    const isUl = lines.every(l => l.startsWith("- ") || l.startsWith("* "));
+    const isOl = lines.every(l => /^\d+\. /.test(l));
+    if (isUl) return <ul key={j}>{lines.map((l, k) => <li key={k}>{renderInline(l.slice(2))}</li>)}</ul>;
+    if (isOl) return <ol key={j}>{lines.map((l, k) => <li key={k}>{renderInline(l.replace(/^\d+\. /, ""))}</li>)}</ol>;
+    return (
+      <p key={j}>
+        {lines.map((line, k) => (
+          <span key={k}>{renderInline(line)}{k < lines.length - 1 && <br />}</span>
+        ))}
+      </p>
+    );
+  });
+  return <div className="prose max-w-none">{nodes}</div>;
+}
+
 function MarkdownContent({ content }: { content: string }) {
   const parts = content.split(/(```[\s\S]*?```)/g);
   return (
-    <div className="prose prose-invert max-w-none">
+    <div>
       {parts.map((part, i) => {
         if (part.startsWith("```")) {
           const lines = part.split("\n");
           const lang = lines[0].replace("```", "").trim();
-          const code = lines.slice(1, -1).join("\n");
-          return (
-            <pre key={i}>
-              {lang && <div className="text-muted-foreground text-xs mb-1 font-mono">{lang}</div>}
-              <code>{code}</code>
-            </pre>
-          );
+          const code = lines.slice(1, lines[lines.length - 1].trim() === "```" ? -1 : undefined).join("\n");
+          return <CodeBlock key={i} lang={lang} code={code} />;
         }
-        const paragraphs = part.split(/\n\n+/);
-        return paragraphs.map((para, j) => {
-          if (!para.trim()) return null;
-          if (para.startsWith("# ")) return <h1 key={`${i}-${j}`}>{para.slice(2)}</h1>;
-          if (para.startsWith("## ")) return <h2 key={`${i}-${j}`}>{para.slice(3)}</h2>;
-          if (para.startsWith("### ")) return <h3 key={`${i}-${j}`}>{para.slice(4)}</h3>;
-          const lines = para.split("\n");
-          if (lines.every(l => l.startsWith("- ") || l.startsWith("* "))) {
-            return <ul key={`${i}-${j}`}>{lines.map((l, k) => <li key={k}>{renderInline(l.slice(2))}</li>)}</ul>;
-          }
-          if (lines.every(l => /^\d+\. /.test(l))) {
-            return <ol key={`${i}-${j}`}>{lines.map((l, k) => <li key={k}>{renderInline(l.replace(/^\d+\. /, ""))}</li>)}</ol>;
-          }
-          return (
-            <p key={`${i}-${j}`}>
-              {lines.map((line, k) => (
-                <span key={k}>{renderInline(line)}{k < lines.length - 1 && <br />}</span>
-              ))}
-            </p>
-          );
-        });
+        return part.trim() ? <TextBlock key={i} text={part} /> : null;
       })}
     </div>
   );

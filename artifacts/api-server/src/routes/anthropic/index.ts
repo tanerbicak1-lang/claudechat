@@ -22,25 +22,25 @@ if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR, { recursive: true });
 
 type MessageContentBlock = TextBlockParam | ImageBlockParam | DocumentBlockParam;
 
-const SYSTEM_PROMPT = `Sen yardımcı bir AI asistanısın. 
+const SYSTEM_PROMPT = `Sen yardımcı bir AI asistanısın. Türkçe yanıt ver.
 
-Kullanıcı senden dosya üretmeni istediğinde (kod, metin, konfigürasyon, vb.), yanıtının içinde aşağıdaki XML formatını kullan:
+Kod veya dosya üretirken markdown kod bloklarını kullan:
+
+\`\`\`html
+<html>...</html>
+\`\`\`
+
+\`\`\`python
+print("merhaba")
+\`\`\`
+
+İstenirse birden fazla kod bloğu üretebilirsin. Açıklama metnini kod bloklarının dışında yaz.
+Belirli bir dosya adı vermek istersen şu formatı kullanabilirsin:
 
 <file name="dosyaadi.uzanti">
-dosya içeriği buraya
+içerik
 </file>
-
-Örnek:
-<file name="script.py">
-print("Merhaba Dünya")
-</file>
-
-<file name="config.json">
-{"key": "value"}
-</file>
-
-Birden fazla dosya üretebilirsin. Dosya bloklarını yanıtının herhangi bir yerine koyabilirsin.
-Açıklama ve dosya içeriğini birlikte sunabilirsin.`;
+`;
 
 function buildContentBlocks(text: string, file?: Express.Multer.File): MessageContentBlock[] {
   const blocks: MessageContentBlock[] = [];
@@ -84,28 +84,64 @@ interface SavedFile {
   size: number;
 }
 
+const LANG_TO_EXT: Record<string, string> = {
+  html: "html", css: "css", javascript: "js", js: "js",
+  typescript: "ts", ts: "ts", tsx: "tsx", jsx: "jsx",
+  python: "py", py: "py", php: "php", ruby: "rb",
+  java: "java", kotlin: "kt", swift: "swift", go: "go",
+  rust: "rs", c: "c", cpp: "cpp", "c++": "cpp",
+  csharp: "cs", "c#": "cs", shell: "sh", bash: "sh",
+  sh: "sh", sql: "sql", json: "json", yaml: "yaml",
+  yml: "yml", xml: "xml", markdown: "md", md: "md",
+  dockerfile: "Dockerfile", toml: "toml", env: "env",
+};
+
+function langToExt(lang: string): string {
+  return LANG_TO_EXT[lang.toLowerCase()] || "txt";
+}
+
+function saveFile(name: string, content: string): SavedFile {
+  const safeBase = name.replace(/[^a-zA-Z0-9._\-]/g, "_");
+  const timestamp = Date.now();
+  const safeFileName = `${timestamp}_${safeBase}`;
+  fs.writeFileSync(path.join(FILES_DIR, safeFileName), content, "utf8");
+  return {
+    name,
+    downloadUrl: `/api/files/${safeFileName}`,
+    size: Buffer.byteLength(content, "utf8"),
+  };
+}
+
 function extractAndSaveFiles(response: string): { cleanText: string; savedFiles: SavedFile[] } {
   const savedFiles: SavedFile[] = [];
-  const filePattern = /<file\s+name="([^"]+)">([\s\S]*?)<\/file>/g;
 
+  // 1. Named <file> tags
+  const fileTagPattern = /<file\s+name="([^"]+)">([\s\S]*?)<\/file>/g;
   let match: RegExpExecArray | null;
-  while ((match = filePattern.exec(response)) !== null) {
+  const taggedFileNames = new Set<string>();
+  while ((match = fileTagPattern.exec(response)) !== null) {
     const fileName = match[1].replace(/[^a-zA-Z0-9._\-]/g, "_");
-    const fileContent = match[2].replace(/^\n/, "").replace(/\n$/, "");
-
-    const timestamp = Date.now();
-    const safeFileName = `${timestamp}_${fileName}`;
-    const filePath = path.join(FILES_DIR, safeFileName);
-
-    fs.writeFileSync(filePath, fileContent, "utf8");
-    savedFiles.push({
-      name: fileName,
-      downloadUrl: `/api/files/${safeFileName}`,
-      size: Buffer.byteLength(fileContent, "utf8"),
-    });
+    const content = match[2].replace(/^\n/, "").replace(/\n$/, "");
+    savedFiles.push(saveFile(fileName, content));
+    taggedFileNames.add(match[0]);
   }
 
-  const cleanText = response.replace(/<file\s+name="[^"]+">[\s\S]*?<\/file>/g, "").trim();
+  // Remove file tags from text
+  let cleanText = response.replace(/<file\s+name="[^"]+">[\s\S]*?<\/file>/g, "").trim();
+
+  // 2. Auto-extract code blocks (```lang ... ```)
+  const codeBlockPattern = /```(\w*)\n([\s\S]*?)```/g;
+  let blockIndex = 0;
+  while ((match = codeBlockPattern.exec(cleanText)) !== null) {
+    const lang = match[1].trim();
+    const code = match[2];
+    if (!code.trim()) continue;
+    const ext = langToExt(lang || "txt");
+    const fileName = `output_${Date.now() + blockIndex}.${ext}`;
+    savedFiles.push(saveFile(fileName, code));
+    blockIndex++;
+  }
+
   return { cleanText, savedFiles };
 }
 
