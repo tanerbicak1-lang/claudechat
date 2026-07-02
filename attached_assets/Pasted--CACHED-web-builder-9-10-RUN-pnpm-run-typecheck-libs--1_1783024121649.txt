@@ -1,0 +1,47 @@
+ => CACHED [web builder  9/10] RUN pnpm run typecheck:libs                                                 0.0s
+ => ERROR [web builder 10/10] RUN pnpm --filter @workspace/claude-chat run build                           1.9s
+------
+ > [web builder 10/10] RUN pnpm --filter @workspace/claude-chat run build:
+1.451 $ vite build --config vite.config.ts
+1.752 /workspace/node_modules/.pnpm/rollup@4.62.2/node_modules/rollup/dist/native.js:121
+1.752           throw new Error(
+1.752                 ^
+1.752 
+1.752 Error: Cannot find module @rollup/rollup-linux-x64-musl. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.
+1.752     at requireWithFriendlyError (/workspace/node_modules/.pnpm/rollup@4.62.2/node_modules/rollup/dist/native.js:121:9)
+1.752     at Object.<anonymous> (/workspace/node_modules/.pnpm/rollup@4.62.2/node_modules/rollup/dist/native.js:130:76)
+1.752     at Module._compile (node:internal/modules/cjs/loader:1871:14)
+1.752     at Object..js (node:internal/modules/cjs/loader:2002:10)
+1.752     at Module.load (node:internal/modules/cjs/loader:1594:32)
+1.752     at Module._load (node:internal/modules/cjs/loader:1396:12)
+1.752     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+1.752     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:372:15)
+1.752     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:244:9)
+1.752     at ModuleJob.run (node:internal/modules/esm/module_job:439:25) {
+1.752   [cause]: Error: Cannot find module '@rollup/rollup-linux-x64-musl'
+1.752   Require stack:
+1.752   - /workspace/node_modules/.pnpm/rollup@4.62.2/node_modules/rollup/dist/native.js
+1.752       at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+1.752       at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+1.752       at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+1.752       at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+1.752       at Module._load (node:internal/modules/cjs/loader:1294:5)
+1.752       at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+1.752       at Module.require (node:internal/modules/cjs/loader:1617:12)
+1.752       at require (node:internal/modules/helpers:153:16)
+1.752       at requireWithFriendlyError (/workspace/node_modules/.pnpm/rollup@4.62.2/node_modules/rollup/dist/native.js:103:10)
+1.752       at Object.<anonymous> (/workspace/node_modules/.pnpm/rollup@4.62.2/node_modules/rollup/dist/native.js:130:76) {
+1.752     code: 'MODULE_NOT_FOUND',
+1.752     requireStack: [
+1.752       '/workspace/node_modules/.pnpm/rollup@4.62.2/node_modules/rollup/dist/native.js'
+1.752     ]
+1.752   }
+1.752 }
+1.752 
+1.752 Node.js v24.18.0
+1.803 /workspace/artifacts/claude-chat:
+1.803 [ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @workspace/claude-chat@0.0.0 build: `vite build --config vite.config.ts`
+1.803 Exit status 1
+------
+failed to solve: process "/bin/sh -c pnpm --filter @workspace/claude-chat run build" did not complete successfully: exit code: 1
+tprominer@shuffle:/opt/claude-chat$ 
