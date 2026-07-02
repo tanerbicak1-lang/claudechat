@@ -361,6 +361,34 @@ export default function ChatPage() {
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItems = items.filter(item => item.type.startsWith("image/"));
+    if (imageItems.length === 0) return;
+
+    e.preventDefault();
+    const newFiles: File[] = [];
+    const errors: string[] = [];
+
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      const timestamp = Date.now();
+      const ext = item.type.split("/")[1] || "png";
+      const namedFile = new File([file], `screenshot_${timestamp}.${ext}`, { type: item.type });
+      if (namedFile.size > MAX_BINARY_FILE_SIZE) {
+        errors.push(`Yapıştırılan resim çok büyük (max 20 MB)`);
+      } else {
+        newFiles.push(namedFile);
+      }
+    }
+
+    if (errors.length > 0) setFileErrors(errors);
+    if (newFiles.length > 0) {
+      setAttachedFiles(prev => [...prev, ...newFiles]);
+    }
+  };
+
   const handleDeleteConfirm = async () => {
     if (convToDelete) {
       await deleteConversation.mutateAsync({ id: convToDelete });
@@ -626,7 +654,8 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Mesajınızı yazın... (Shift+Enter: yeni satır)"
+                onPaste={handlePaste}
+                placeholder="Mesajınızı yazın... (Shift+Enter: yeni satır, Ctrl+V: resim yapıştır)"
                 className="min-h-[52px] max-h-[180px] w-full resize-none border-0 bg-transparent py-3 pl-3 pr-20 focus-visible:ring-0 text-xs placeholder:text-muted-foreground"
                 rows={1}
                 disabled={isStreaming}
