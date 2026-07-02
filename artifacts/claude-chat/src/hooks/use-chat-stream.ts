@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { 
   getListAnthropicMessagesQueryKey,
@@ -13,15 +13,15 @@ export function useChatStream(conversationId?: number) {
   
   const createConversation = useCreateAnthropicConversation();
 
-  const sendMessage = useCallback(async (content: string) => {
-    if (!content.trim() || isStreaming) return null;
+  const sendMessage = useCallback(async (content: string, file?: File) => {
+    if ((!content.trim() && !file) || isStreaming) return null;
 
     let targetConversationId = conversationId;
 
     if (!targetConversationId) {
-      // Create new conversation
+      const title = content.slice(0, 40) + (content.length > 40 ? "..." : "") || (file ? file.name : "New conversation");
       const newConv = await createConversation.mutateAsync({
-        data: { title: content.slice(0, 40) + (content.length > 40 ? "..." : "") }
+        data: { title }
       });
       targetConversationId = newConv.id;
     }
@@ -31,11 +31,24 @@ export function useChatStream(conversationId?: number) {
 
     try {
       const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-      const response = await fetch(`${BASE}/api/anthropic/conversations/${targetConversationId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
+
+      let body: FormData | string;
+      let headers: Record<string, string> = {};
+
+      if (file) {
+        const formData = new FormData();
+        formData.append("content", content);
+        formData.append("file", file);
+        body = formData;
+      } else {
+        body = JSON.stringify({ content });
+        headers["Content-Type"] = "application/json";
+      }
+
+      const response = await fetch(
+        `${BASE}/api/anthropic/conversations/${targetConversationId}/messages`,
+        { method: "POST", headers, body }
+      );
 
       if (!response.ok) {
         throw new Error("Failed to send message");
@@ -62,16 +75,12 @@ export function useChatStream(conversationId?: number) {
               fullContent += parsed.content;
               setStreamingContent(fullContent);
             }
-            if (parsed.done) {
-              // Finish
-            }
-          } catch (e) {
-            // Ignore parse errors for incomplete chunks
+          } catch {
+            // ignore incomplete chunks
           }
         }
       }
       
-      // Complete stream
       queryClient.invalidateQueries({ queryKey: getListAnthropicMessagesQueryKey(targetConversationId) });
       queryClient.invalidateQueries({ queryKey: getGetAnthropicConversationQueryKey(targetConversationId) });
       

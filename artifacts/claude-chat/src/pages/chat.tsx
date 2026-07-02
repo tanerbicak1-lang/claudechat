@@ -13,7 +13,7 @@ import { useChatStream } from "@/hooks/use-chat-stream";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PenSquare, Trash2, Send, MessageSquare, Loader2, Sparkles, Menu } from "lucide-react";
+import { PenSquare, Trash2, Send, Loader2, Sparkles, Menu, Paperclip, X, FileText, Image } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,28 +27,19 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-// Simple markdown renderer for chat messages
+const ACCEPTED_TYPES = "image/jpeg,image/png,image/gif,image/webp,application/pdf";
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
 function MarkdownContent({ content }: { content: string }) {
-  // A very basic parser for demo purposes.
-  // It handles paragraphs, bold, italic, and inline code.
   const paragraphs = content.split(/\n\n+/);
-  
   return (
     <div className="prose prose-invert max-w-none">
       {paragraphs.map((para, i) => {
-        // Code blocks
         if (para.startsWith("```")) {
           const lines = para.split("\n");
-          const lang = lines[0].slice(3).trim();
           const code = lines.slice(1, -1).join("\n");
-          return (
-            <pre key={i}>
-              <code>{code}</code>
-            </pre>
-          );
+          return <pre key={i}><code>{code}</code></pre>;
         }
-        
-        // Split by lines for <br/>
         const lines = para.split("\n");
         return (
           <p key={i}>
@@ -65,6 +56,28 @@ function MarkdownContent({ content }: { content: string }) {
   );
 }
 
+function parseMessageContent(raw: string): { text: string; attachment?: { name: string; type: string } } {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed.text !== undefined && parsed.attachment) {
+      return { text: parsed.text, attachment: parsed.attachment };
+    }
+  } catch {
+    // plain text
+  }
+  return { text: raw };
+}
+
+function AttachmentBadge({ name, type }: { name: string; type: string }) {
+  const isImage = type.startsWith("image/");
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-accent/50 rounded-lg px-2.5 py-1.5 mb-1.5 w-fit">
+      {isImage ? <Image className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
+      <span className="truncate max-w-[200px]">{name}</span>
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const params = useParams();
   const [, setLocation] = useLocation();
@@ -72,15 +85,12 @@ export default function ChatPage() {
   const conversationId = params.id ? parseInt(params.id, 10) : undefined;
 
   const { data: conversations, isLoading: isLoadingConversations } = useListAnthropicConversations();
-  
-  // Use all provided hooks
   const { data: conversation } = useGetAnthropicConversation(
     conversationId!,
     { query: { enabled: !!conversationId, queryKey: getGetAnthropicConversationQueryKey(conversationId!) } }
   );
-
   const { data: messages, isLoading: isLoadingMessages } = useListAnthropicMessages(
-    conversationId!, 
+    conversationId!,
     { query: { enabled: !!conversationId } }
   );
 
@@ -88,31 +98,44 @@ export default function ChatPage() {
   const { isStreaming, streamingContent, sendMessage } = useChatStream(conversationId);
 
   const [input, setInput] = useState("");
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [convToDelete, setConvToDelete] = useState<number | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll to bottom when messages or streaming content changes
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, streamingContent]);
 
-  // Focus input on load
   useEffect(() => {
     inputRef.current?.focus();
   }, [conversationId]);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_FILE_SIZE) {
+      setFileError("File is too large (max 20 MB)");
+      return;
+    }
+    setFileError(null);
+    setAttachedFile(file);
+    e.target.value = "";
+  };
+
   const handleSend = async () => {
-    if (!input.trim() || isStreaming) return;
-    
+    if ((!input.trim() && !attachedFile) || isStreaming) return;
     const content = input;
+    const file = attachedFile;
     setInput("");
-    
-    const newConvId = await sendMessage(content);
+    setAttachedFile(null);
+    const newConvId = await sendMessage(content, file ?? undefined);
     if (newConvId && newConvId !== conversationId) {
       queryClient.invalidateQueries({ queryKey: getListAnthropicConversationsQueryKey() });
       setLocation(`/c/${newConvId}`);
@@ -130,12 +153,12 @@ export default function ChatPage() {
     if (convToDelete) {
       await deleteConversation.mutateAsync({ id: convToDelete });
       queryClient.invalidateQueries({ queryKey: getListAnthropicConversationsQueryKey() });
-      if (conversationId === convToDelete) {
-        setLocation("/");
-      }
+      if (conversationId === convToDelete) setLocation("/");
       setConvToDelete(null);
     }
   };
+
+  const canSend = (input.trim().length > 0 || !!attachedFile) && !isStreaming;
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-sidebar">
@@ -144,20 +167,16 @@ export default function ChatPage() {
           <Sparkles className="w-4 h-4 text-primary" />
           <span>Assistant</span>
         </div>
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          onClick={() => {
-            setLocation("/");
-            setMobileOpen(false);
-          }}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => { setLocation("/"); setMobileOpen(false); }}
           className="h-8 w-8 text-muted-foreground hover:text-foreground"
           data-testid="button-new-chat"
         >
           <PenSquare className="w-4 h-4" />
         </Button>
       </div>
-      
       <ScrollArea className="flex-1 px-3">
         <div className="space-y-1 pb-4">
           {isLoadingConversations ? (
@@ -170,31 +189,23 @@ export default function ChatPage() {
             </div>
           ) : (
             conversations?.map((conv) => (
-              <div 
+              <div
                 key={conv.id}
                 className={cn(
                   "group flex items-center justify-between p-2 rounded-md cursor-pointer transition-colors text-sm",
-                  conversationId === conv.id 
-                    ? "bg-accent text-accent-foreground" 
+                  conversationId === conv.id
+                    ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                 )}
-                onClick={() => {
-                  setLocation(`/c/${conv.id}`);
-                  setMobileOpen(false);
-                }}
+                onClick={() => { setLocation(`/c/${conv.id}`); setMobileOpen(false); }}
                 data-testid={`link-conversation-${conv.id}`}
               >
-                <div className="truncate flex-1 pr-2">
-                  {conv.title || "Untitled"}
-                </div>
+                <div className="truncate flex-1 pr-2">{conv.title || "Untitled"}</div>
                 <Button
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConvToDelete(conv.id);
-                  }}
+                  onClick={(e) => { e.stopPropagation(); setConvToDelete(conv.id); }}
                 >
                   <Trash2 className="w-3 h-3" />
                 </Button>
@@ -208,19 +219,15 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-[100dvh] bg-background overflow-hidden text-foreground">
-      
-      {/* Desktop Sidebar */}
       <div className="hidden md:flex w-64 border-r border-border flex-col">
         <SidebarContent />
       </div>
 
-      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col h-full relative w-full">
-        {/* Mobile Header */}
         <div className="md:hidden flex items-center justify-between p-4 border-b border-border bg-background">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="md:hidden h-8 w-8 text-muted-foreground hover:text-foreground">
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                 <Menu className="w-5 h-5" />
               </Button>
             </SheetTrigger>
@@ -228,12 +235,10 @@ export default function ChatPage() {
               <SidebarContent />
             </SheetContent>
           </Sheet>
-          <div className="font-serif text-lg tracking-tight">
-            {conversation?.title || "Assistant"}
-          </div>
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <div className="font-serif text-lg tracking-tight">{conversation?.title || "Assistant"}</div>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setLocation("/")}
             className="h-8 w-8 text-muted-foreground hover:text-foreground"
           >
@@ -241,10 +246,7 @@ export default function ChatPage() {
           </Button>
         </div>
 
-        <div 
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto px-4 md:px-8 py-6 pb-32"
-        >
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 md:px-8 py-6 pb-40">
           <div className="max-w-3xl mx-auto space-y-8">
             {!conversationId ? (
               <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-1000">
@@ -256,34 +258,48 @@ export default function ChatPage() {
               </div>
             ) : (
               <>
-                <div className="hidden md:block text-center mb-8">
-                  <h2 className="text-lg font-serif text-muted-foreground">{conversation?.title}</h2>
-                </div>
-                {messages?.map((msg) => (
-                  <div 
-                    key={msg.id} 
-                    className={cn(
-                      "flex flex-col animate-in fade-in duration-500",
-                      msg.role === "user" ? "items-end" : "items-start"
-                    )}
-                  >
-                    <div 
-                      className={cn(
-                        "px-5 py-3.5 max-w-[85%] sm:max-w-[75%]",
-                        msg.role === "user" 
-                          ? "bg-accent text-accent-foreground rounded-2xl rounded-tr-sm" 
-                          : "text-foreground font-serif leading-relaxed text-lg"
-                      )}
-                    >
-                      {msg.role === "assistant" ? (
-                        <MarkdownContent content={msg.content} />
-                      ) : (
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
-                      )}
-                    </div>
+                {isLoadingMessages ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                   </div>
-                ))}
-                
+                ) : (
+                  <>
+                    <div className="hidden md:block text-center mb-8">
+                      <h2 className="text-lg font-serif text-muted-foreground">{conversation?.title}</h2>
+                    </div>
+                    {messages?.map((msg) => {
+                      const { text, attachment } = parseMessageContent(msg.content);
+                      return (
+                        <div
+                          key={msg.id}
+                          className={cn(
+                            "flex flex-col animate-in fade-in duration-500",
+                            msg.role === "user" ? "items-end" : "items-start"
+                          )}
+                        >
+                          {attachment && msg.role === "user" && (
+                            <AttachmentBadge name={attachment.name} type={attachment.type} />
+                          )}
+                          <div
+                            className={cn(
+                              "px-5 py-3.5 max-w-[85%] sm:max-w-[75%]",
+                              msg.role === "user"
+                                ? "bg-accent text-accent-foreground rounded-2xl rounded-tr-sm"
+                                : "text-foreground font-serif leading-relaxed text-lg"
+                            )}
+                          >
+                            {msg.role === "assistant" ? (
+                              <MarkdownContent content={msg.content} />
+                            ) : (
+                              <div className="whitespace-pre-wrap">{text || <span className="text-muted-foreground italic">(file only)</span>}</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+
                 {isStreaming && (
                   <div className="flex flex-col items-start animate-in fade-in duration-300">
                     <div className="py-3.5 max-w-[85%] sm:max-w-[75%] text-foreground font-serif leading-relaxed text-lg">
@@ -306,7 +322,28 @@ export default function ChatPage() {
 
         {/* Input Area */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background to-transparent pt-12 pb-6 px-4 md:px-8 pointer-events-none">
-          <div className="max-w-3xl mx-auto relative group pointer-events-auto">
+          <div className="max-w-3xl mx-auto pointer-events-auto">
+            {/* Attached file preview */}
+            {attachedFile && (
+              <div className="mb-2 flex items-center gap-2 bg-card border border-card-border rounded-xl px-3 py-2 w-fit">
+                {attachedFile.type.startsWith("image/") ? (
+                  <Image className="w-4 h-4 text-primary shrink-0" />
+                ) : (
+                  <FileText className="w-4 h-4 text-primary shrink-0" />
+                )}
+                <span className="text-sm text-foreground truncate max-w-[240px]">{attachedFile.name}</span>
+                <button
+                  onClick={() => setAttachedFile(null)}
+                  className="text-muted-foreground hover:text-foreground transition-colors ml-1"
+                  data-testid="button-remove-attachment"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            {fileError && (
+              <div className="mb-2 text-xs text-destructive">{fileError}</div>
+            )}
             <div className="relative rounded-2xl bg-card border border-card-border shadow-lg shadow-black/20 focus-within:ring-1 focus-within:ring-primary/30 transition-all duration-300">
               <Textarea
                 ref={inputRef}
@@ -314,25 +351,51 @@ export default function ChatPage() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Message Assistant..."
-                className="min-h-[60px] max-h-[200px] w-full resize-none border-0 bg-transparent py-4 pl-4 pr-12 focus-visible:ring-0 text-base placeholder:text-muted-foreground"
+                className="min-h-[60px] max-h-[200px] w-full resize-none border-0 bg-transparent py-4 pl-4 pr-24 focus-visible:ring-0 text-base placeholder:text-muted-foreground"
                 rows={1}
                 disabled={isStreaming}
                 data-testid="input-message"
               />
-              <Button
-                size="icon"
-                className={cn(
-                  "absolute bottom-3 right-3 h-8 w-8 rounded-xl transition-all duration-300",
-                  input.trim() && !isStreaming 
-                    ? "bg-primary text-primary-foreground opacity-100 hover:bg-primary/90" 
-                    : "bg-muted text-muted-foreground opacity-50"
-                )}
-                disabled={!input.trim() || isStreaming}
-                onClick={handleSend}
-                data-testid="button-send"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
+              <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPTED_TYPES}
+                  onChange={handleFileChange}
+                  className="hidden"
+                  data-testid="input-file"
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className={cn(
+                    "h-8 w-8 rounded-xl transition-all duration-300",
+                    attachedFile
+                      ? "text-primary bg-primary/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  )}
+                  disabled={isStreaming}
+                  onClick={() => fileInputRef.current?.click()}
+                  data-testid="button-attach"
+                  title="Attach image or PDF"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  className={cn(
+                    "h-8 w-8 rounded-xl transition-all duration-300",
+                    canSend
+                      ? "bg-primary text-primary-foreground opacity-100 hover:bg-primary/90"
+                      : "bg-muted text-muted-foreground opacity-50"
+                  )}
+                  disabled={!canSend}
+                  onClick={handleSend}
+                  data-testid="button-send"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
             <div className="text-center mt-2 text-xs text-muted-foreground font-serif italic">
               Assistant can make mistakes. Consider verifying important information.
@@ -357,7 +420,6 @@ export default function ChatPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
     </div>
   );
 }
